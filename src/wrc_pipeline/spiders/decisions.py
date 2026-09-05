@@ -6,7 +6,7 @@ from datetime import datetime
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import scrapy
-from scrapy import signals
+from scrapy.crawler import Crawler
 from scrapy.exceptions import DropItem
 from scrapy.http import Response
 
@@ -36,7 +36,7 @@ class DecisionsSpider(scrapy.Spider):
         self,
         start_date: str | None = None,
         end_date: str | None = None,
-        refresh_existing: str = "false",
+        refresh_existing: str | None = None,
         *args: str,
         **kwargs: str,
     ) -> None:
@@ -46,7 +46,10 @@ class DecisionsSpider(scrapy.Spider):
         self.start_date = start_date
         self.end_date = end_date
         self.partition_months = int(os.getenv("SCRAPE_PARTITION_MONTHS", "1"))
-        self.refresh_existing = refresh_existing.lower() in {
+        refresh_value = refresh_existing or os.getenv(
+            "SCRAPE_REFRESH_EXISTING", "false"
+        )
+        self.refresh_existing = refresh_value.lower() in {
             "1",
             "true",
             "yes",
@@ -67,12 +70,11 @@ class DecisionsSpider(scrapy.Spider):
         self.expected_results = 0
 
     @classmethod
-    def from_crawler(cls, crawler: scrapy.crawler.Crawler, *args: str, **kwargs: str):
-        """Attach service storage and the spider-close summary signal."""
+    def from_crawler(cls, crawler: Crawler, *args: str, **kwargs: str):
+        """Attach the metadata store used for pre-download idempotency checks."""
         spider = super().from_crawler(crawler, *args, **kwargs)
         spider.mongo = MongoStorage(AppConfig.from_env())
         spider.mongo.ensure_indexes()
-        crawler.signals.connect(spider.closed, signal=signals.spider_closed)
         return spider
 
     def start_requests(self):
@@ -86,6 +88,7 @@ class DecisionsSpider(scrapy.Spider):
                     start_date=partition.start_date.isoformat(),
                     end_date=partition.end_date.isoformat(),
                 )
+
                 yield scrapy.Request(
                     self.build_search_url(partition, body_value),
                     callback=self.parse_search,
@@ -101,6 +104,11 @@ class DecisionsSpider(scrapy.Spider):
                         },
                     },
                 )
+
+    async def start(self):
+        """Bridge the generator to Scrapy's current async spider start hook."""
+        for request in self.start_requests():
+            yield request
 
     def build_search_url(
         self, partition: DatePartition, body_value: str, page_number: int | None = None
@@ -211,6 +219,11 @@ class DecisionsSpider(scrapy.Spider):
         record = response.meta["record"]
         content_type, extension = self._file_details(response)
         if extension not in {"pdf", "doc", "docx", "html"}:
+            self.record_failure(
+                **self._context(record),
+                url=response.url,
+                reason=f"Unsupported source document type: {content_type}",
+            )
             raise DropItem(f"Unsupported source document type: {content_type}")
         yield self._item_from_bytes(
             record, response.body, content_type, extension
@@ -306,7 +319,14 @@ class DecisionsSpider(scrapy.Spider):
         if body.startswith(b"%PDF") or "pdf" in content_type:
             return content_type or "application/pdf", "pdf"
         if "wordprocessingml.document" in content_type or path.endswith(".docx"):
-            return content_type or "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "docx"
+            return (
+                content_type
+                or (
+                    "application/vnd.openxmlformats-officedocument."
+                    "wordprocessingml.document"
+                ),
+                "docx",
+            )
         if content_type == "application/msword" or path.endswith(".doc"):
             return content_type or "application/msword", "doc"
         if "html" in content_type or path.endswith((".html", ".htm")):

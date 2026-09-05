@@ -34,10 +34,12 @@ def ingestion_op(context) -> None:
     )
 
 
-@op(config_schema={"start_date": str, "end_date": str}, ins={"ingestion": In(Nothing)})
-def transformation_op(context, ingestion) -> None:
+@op(
+    config_schema={"start_date": str, "end_date": str},
+    ins={"ingestion": In(Nothing)},
+)
+def transformation_op(context) -> None:
     """Run transformation only after ingestion completes successfully."""
-    del ingestion
     config = context.op_config
     subprocess.run(
         [

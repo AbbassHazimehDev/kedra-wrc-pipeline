@@ -1,5 +1,6 @@
 """Landing-zone item pipeline for MongoDB metadata and MinIO source bytes."""
 
+from pymongo.errors import DuplicateKeyError
 from scrapy.exceptions import DropItem
 
 from wrc_pipeline.config import AppConfig
@@ -17,26 +18,31 @@ class LandingPipeline:
         self.config = config or AppConfig.from_env()
         self.mongo: MongoStorage | None = None
         self.minio: MinioStorage | None = None
+        self.crawler = None
 
     @classmethod
     def from_crawler(cls, crawler):
         """Create the pipeline using the same environment as Scrapy."""
-        return cls(AppConfig.from_env())
+        pipeline = cls(AppConfig.from_env())
+        pipeline.crawler = crawler
+        return pipeline
 
-    def open_spider(self, spider) -> None:
+    def open_spider(self, spider=None) -> None:
         """Connect to both stores and initialize their configured buckets/indexes."""
+        spider = spider or self.crawler.spider
         self.mongo = MongoStorage(self.config)
         self.mongo.ensure_indexes()
         self.minio = MinioStorage(self.config)
         self.minio.ensure_buckets()
 
-    def close_spider(self, spider) -> None:
+    def close_spider(self, spider=None) -> None:
         """Release service clients when the crawl finishes."""
         if self.mongo:
             self.mongo.close()
 
-    def process_item(self, item, spider):
+    def process_item(self, item, spider=None):
         """Store one item, treating repeated identical content as a no-op."""
+        spider = spider or self.crawler.spider
         if not self.mongo or not self.minio:
             raise DropItem("Landing pipeline is not open")
 
@@ -78,13 +84,24 @@ class LandingPipeline:
                     "landing_bucket": bucket,
                 }
             )
-            self.mongo.landing_documents.insert_one(metadata)
-            emit_event(
-                "record_landed",
-                **self._context(item),
-                file_hash=file_hash,
-                object_path=object_path,
-            )
+            try:
+                self.mongo.landing_documents.insert_one(metadata)
+            except DuplicateKeyError:
+                # Another concurrent request may have landed this exact hash
+                # after the pre-check. The unique index makes that race safe.
+                emit_event(
+                    "record_unchanged",
+                    **self._context(item),
+                    file_hash=file_hash,
+                    object_path=object_path,
+                )
+            else:
+                emit_event(
+                    "record_landed",
+                    **self._context(item),
+                    file_hash=file_hash,
+                    object_path=object_path,
+                )
             self._record_success(spider)
             return item
         except Exception as exc:

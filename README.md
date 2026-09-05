@@ -77,21 +77,22 @@ uv run dagster dev -m wrc_pipeline.orchestration.definitions
 For a direct configured execution:
 
 ```powershell
+Copy-Item run-config.example.yaml run-config.yaml
 uv run dagster job execute -m wrc_pipeline.orchestration.definitions -j wrc_pipeline_job `
   -c run-config.yaml
 ```
 
-Example `run-config.yaml`:
+The committed `run-config.example.yaml` contains:
 
 ```yaml
 ops:
   ingestion_op:
     config:
-      start_date: "2024-01-01"
+      start_date: "2024-01-31"
       end_date: "2024-01-31"
   transformation_op:
     config:
-      start_date: "2024-01-01"
+      start_date: "2024-01-31"
       end_date: "2024-01-31"
 ```
 
@@ -108,7 +109,7 @@ To inspect MinIO, open http://localhost:9001 and browse the configured landing a
 
 ```powershell
 docker exec -it kedra-wrc-mongodb mongosh wrc_pipeline
-db.landing_documents.countDocuments()
+db.raw_documents.countDocuments()
 db.processed_documents.countDocuments()
 ```
 
@@ -126,5 +127,7 @@ Named volumes keep data across restarts. To remove local data intentionally, use
 
 - If a service is unhealthy, inspect `docker compose logs mongodb` or `docker compose logs minio`.
 - If Python imports fail, run `uv sync` from the repository root and use `uv run ...`.
+- If another MongoDB already owns IPv4 port 27017 on Windows, point `MONGO_URI` at
+  `mongodb://[::1]:27017` for Docker Desktop's IPv6 publication, or stop the conflicting local service.
 - If a port is busy, change the host side of the port mapping in `docker-compose.yml` and update `.env` where applicable.
 - If the public site returns transient errors, keep the configured polite delay/AutoThrottle and let Scrapy retry; do not disable robots or bypass access controls.

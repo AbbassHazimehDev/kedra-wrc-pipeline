@@ -31,7 +31,10 @@ def extract_legal_html(raw_html: bytes) -> bytes:
     ):
         element.decompose()
 
-    output = BeautifulSoup("<!doctype html><html><head></head><body></body></html>", "html.parser")
+    output = BeautifulSoup(
+        "<!doctype html><html><head></head><body></body></html>",
+        "html.parser",
+    )
     output.head.append(output.new_tag("meta", charset="utf-8"))
     output.body.append(content)
     return output.encode("utf-8")
