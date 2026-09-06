@@ -1,6 +1,8 @@
 """Tests for verified WRC request and result parsing behavior."""
 
 from datetime import date
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from scrapy.http import HtmlResponse, Response
 
@@ -109,3 +111,21 @@ def test_document_type_supports_docx_content_type():
         },
     )
     assert DecisionsSpider._file_details(response)[1] == "docx"
+
+
+def test_request_failure_logs_url_and_increments_failure_count():
+    spider = make_spider()
+    failure = SimpleNamespace(
+        request=SimpleNamespace(
+            url="https://example.test/search?pageNumber=2",
+            meta={"record_context": {"body": "Labour Court"}},
+        ),
+        value=RuntimeError("connection failed"),
+    )
+
+    with patch("wrc_pipeline.spiders.decisions.emit_event") as emit_event:
+        spider.handle_request_failure(failure)
+
+    assert spider.records_failed == 1
+    assert emit_event.call_args.kwargs["url"] == failure.request.url
+    assert emit_event.call_args.kwargs["reason"] == "connection failed"
