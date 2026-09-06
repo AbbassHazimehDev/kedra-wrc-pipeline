@@ -76,6 +76,8 @@ uv run scrapy crawl decisions -a start_date=2024-01-01 -a end_date=2024-01-31 -a
 
 Important events are JSON lines on stdout. The final `run_summary` reports expected, found, succeeded, failed, and skipped records.
 
+Request, download, parse, and storage failures are logged with the partition, Body, identifier when available, URL, status code when available, and reason. A failed item is dropped after logging so other records in the crawl can continue.
+
 ## Run transformation
 
 ```powershell
