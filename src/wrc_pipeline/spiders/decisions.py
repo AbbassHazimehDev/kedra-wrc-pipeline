@@ -356,6 +356,7 @@ class DecisionsSpider(scrapy.Spider):
     def handle_request_failure(self, failure):
         """Log final request failures after Scrapy retries are exhausted."""
         context = dict(failure.request.meta.get("record_context", {}))
+        context.setdefault("url", failure.request.url)
         response = getattr(failure.value, "response", None)
         status_code = response.status if response is not None else None
         context.update(
@@ -367,6 +368,7 @@ class DecisionsSpider(scrapy.Spider):
         if "identifier" in context:
             self.record_failure(**context)
         else:
+            self.records_failed += 1
             emit_event("request_failed", **context)
 
     def closed(self, reason: str) -> None:
