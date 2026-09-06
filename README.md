@@ -49,6 +49,8 @@ if (-not (Test-Path .env)) {
 
 `.env` contains local-only MinIO credentials and is ignored by Git. Adjust any ports or settings there if needed.
 
+The MinIO bucket names and object-key prefixes are configurable with `MINIO_LANDING_BUCKET`, `MINIO_PROCESSED_BUCKET`, `MINIO_LANDING_PREFIX`, and `MINIO_PROCESSED_PREFIX`. Scraping concurrency, delay, partition size, retries, timeout, AutoThrottle values, and the WRC endpoint are also configurable in `.env`.
+
 ## Start and verify local services
 
 ```powershell

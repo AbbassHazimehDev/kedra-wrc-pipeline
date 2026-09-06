@@ -16,6 +16,8 @@ def make_config() -> AppConfig:
         minio_secure=False,
         minio_landing_bucket="landing",
         minio_processed_bucket="processed",
+        minio_landing_prefix="landing",
+        minio_processed_prefix="processed",
         scrape_partition_months=1,
         scrape_retry_times=3,
         scrape_download_timeout=60,

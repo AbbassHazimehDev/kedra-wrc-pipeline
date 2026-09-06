@@ -20,6 +20,13 @@ def _as_bool(name: str, default: bool) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _prefix(name: str, default: str) -> str:
+    value = os.getenv(name, default).strip().strip("/")
+    if not value:
+        raise RuntimeError(f"Configuration value cannot be empty: {name}")
+    return value
+
+
 @dataclass(frozen=True)
 class AppConfig:
     """Runtime configuration shared by ingestion and transformation."""
@@ -34,6 +41,8 @@ class AppConfig:
     minio_secure: bool
     minio_landing_bucket: str
     minio_processed_bucket: str
+    minio_landing_prefix: str
+    minio_processed_prefix: str
     scrape_partition_months: int
     scrape_retry_times: int
     scrape_download_timeout: int
@@ -56,6 +65,10 @@ class AppConfig:
             minio_secure=_as_bool("MINIO_SECURE", False),
             minio_landing_bucket=_required("MINIO_LANDING_BUCKET"),
             minio_processed_bucket=_required("MINIO_PROCESSED_BUCKET"),
+            minio_landing_prefix=_prefix("MINIO_LANDING_PREFIX", "landing"),
+            minio_processed_prefix=_prefix(
+                "MINIO_PROCESSED_PREFIX", "processed"
+            ),
             scrape_partition_months=int(os.getenv("SCRAPE_PARTITION_MONTHS", "1")),
             scrape_retry_times=int(os.getenv("SCRAPE_RETRY_TIMES", "3")),
             scrape_download_timeout=int(

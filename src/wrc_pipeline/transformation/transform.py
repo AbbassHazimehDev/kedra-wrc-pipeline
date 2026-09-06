@@ -127,7 +127,7 @@ def _transform_one(
     identifier = safe_filename_component(record["identifier"])
     body = safe_filename_component(record["body"])
     object_path = (
-        f"processed/{body}/{record['partition_date']}/"
+        f"{config.minio_processed_prefix}/{body}/{record['partition_date']}/"
         f"{record['file_hash'][:12]}/{identifier}.{extension}"
     )
     bucket = config.minio_processed_bucket

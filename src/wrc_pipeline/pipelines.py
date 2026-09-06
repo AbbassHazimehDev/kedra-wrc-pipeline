@@ -119,12 +119,13 @@ class LandingPipeline:
         body = safe_filename_component(item["body"])
         identifier = safe_filename_component(item["identifier"])
         extension = item["file_extension"]
-        base = f"landing/{body}/{item['partition_date']}/{identifier}.{extension}"
+        prefix = self.config.minio_landing_prefix
+        base = f"{prefix}/{body}/{item['partition_date']}/{identifier}.{extension}"
         if existing or self.minio.object_exists(
             self.config.minio_landing_bucket, base
         ):
             return (
-                f"landing/{body}/{item['partition_date']}/"
+                f"{prefix}/{body}/{item['partition_date']}/"
                 f"{identifier}--{file_hash[:12]}.{extension}"
             )
         return base
