@@ -6,19 +6,16 @@ from datetime import datetime
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import scrapy
-from scrapy.crawler import Crawler
-from scrapy.exceptions import DropItem
+from scrapy.exceptions import DropItem #Used when a scraped record should be rejected.
 from scrapy.http import Response
 
-from wrc_pipeline.config import AppConfig
 from wrc_pipeline.items import WrcDecisionItem
-from wrc_pipeline.storage.mongo import MongoStorage
 from wrc_pipeline.utils.dates import DatePartition, generate_partitions
 from wrc_pipeline.utils.hashing import sha256_bytes
 from wrc_pipeline.utils.logging import emit_event
 
 
-WRC_BODIES = {
+WRC_BODIES = { #bodies in workplace relations website.
     "Employment Appeals Tribunal": "2",
     "Equality Tribunal": "1",
     "Labour Court": "3",
@@ -26,28 +23,28 @@ WRC_BODIES = {
 }
 
 
-class DecisionsSpider(scrapy.Spider):
+class DecisionsSpider(scrapy.Spider): #Inherits from scrapy0.Spider class.(requestes,callbacks,crawler integration.)
     """Search each WRC Body and follow every result's detail/document link."""
 
-    name = "decisions"
-    allowed_domains = ["workplacerelations.ie"]
+    name = "decisions" #Name of the spider.
+    allowed_domains = ["workplacerelations.ie"] #Allowed domains for the spider.
 
     def __init__(
         self,
         start_date: str | None = None,
         end_date: str | None = None,
         refresh_existing: str | None = None,
-        *args: str,
-        **kwargs: str,
+        *args: str, #Positional arguments.(passed to the spider class)
+        **kwargs: str, #Named arguments.
     ) -> None:
-        super().__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)#Calls the parent class constructor.
         if not start_date or not end_date:
             raise ValueError("start_date and end_date are required")
-        self.start_date = start_date
+        self.start_date = start_date #the values are stored on the spider object.
         self.end_date = end_date
         self.partition_months = int(os.getenv("SCRAPE_PARTITION_MONTHS", "1"))
         refresh_value = refresh_existing or os.getenv(
-            "SCRAPE_REFRESH_EXISTING", "false"
+            "SCRAPE_REFRESH_EXISTING", "false" #Re-fetch and re-check the source
         )
         self.refresh_existing = refresh_value.lower() in {
             "1",
@@ -62,22 +59,13 @@ class DecisionsSpider(scrapy.Spider):
         self.partitions = generate_partitions(
             start_date, end_date, self.partition_months
         )
-        self.mongo: MongoStorage | None = None
         self.records_found = 0
         self.records_succeeded = 0
         self.records_failed = 0
         self.records_skipped = 0
         self.expected_results = 0
 
-    @classmethod
-    def from_crawler(cls, crawler: Crawler, *args: str, **kwargs: str):
-        """Attach the metadata store used for pre-download idempotency checks."""
-        spider = super().from_crawler(crawler, *args, **kwargs)
-        spider.mongo = MongoStorage(AppConfig.from_env())
-        spider.mongo.ensure_indexes()
-        return spider
-
-    def start_requests(self):
+    def start_requests(self): #This is the first method that creates website requests.
         """Start one search request for each partition and Body."""
         for partition in self.partitions:
             for body, body_value in WRC_BODIES.items():
@@ -91,10 +79,10 @@ class DecisionsSpider(scrapy.Spider):
 
                 yield scrapy.Request(
                     self.build_search_url(partition, body_value),
-                    callback=self.parse_search,
+                    callback=self.parse_search, #without parentheses because it should run later.
                     errback=self.handle_request_failure,
-                    meta={
-                        "partition": partition,
+                    meta={ #The spider needs this information because the response itself does not necessarily tell us which internal partition or body triggered the request.
+                        "partition": partition, #used in parse_search method.
                         "body": body,
                         "body_value": body_value,
                         "page_number": 1,
@@ -130,11 +118,11 @@ class DecisionsSpider(scrapy.Spider):
         partition: DatePartition = response.meta["partition"]
         body = response.meta["body"]
         page_number = response.meta["page_number"]
-        expected = self._result_count(response)
+        expected = self._result_count(response) #The number of results expected to be found on the page.
         if expected is not None and page_number == 1:
-            self.expected_results += expected
-
-        result_nodes = response.css("li.each-item")
+            self.expected_results += expected #The total number of results expected to be found in the entire search.
+            #example: Shows 1 to 10 of 285 results
+        result_nodes = response.css("li.each-item") #counts the HTML result rows.
         self.records_found += len(result_nodes)
         emit_event(
             "search_page",
@@ -145,8 +133,8 @@ class DecisionsSpider(scrapy.Spider):
             expected_results=expected,
         )
 
-        for node in result_nodes:
-            record = self._parse_result(node, response, partition, body)
+        for node in result_nodes: #Processing every result node.
+            record = self._parse_result(node, response, partition, body) #At this stage, the spider has information from the search result, but it has not yet downloaded the detail page.
             if not record:
                 self.record_failure(
                     partition_date=partition.partition_date,
@@ -155,30 +143,21 @@ class DecisionsSpider(scrapy.Spider):
                 )
                 continue
 
-            if self.mongo and not self.refresh_existing:
-                existing = self.mongo.find_latest_landing(record["source_identity"])
-                if existing:
-                    self.records_skipped += 1
-                    emit_event(
-                        "record_skipped_unchanged_check",
-                        **self._context(record),
-                    )
-                    continue
-
             yield scrapy.Request(
-                record["source_url"],
+                record["source_url"], #get request to to this URL.(scheduler will download it lator)
                 callback=self.parse_detail,
                 errback=self.handle_request_failure,
                 meta={
                     "record": record,
                     "record_context": self._context(record),
+                    "dedupe_before_download": True,
                 },
             )
 
         next_page = self._next_page(response, page_number)
         if next_page:
             yield scrapy.Request(
-                response.urljoin(next_page),
+                response.urljoin(next_page), #The next page URL is constructed by joining the current URL with the next page number.
                 callback=self.parse_search,
                 errback=self.handle_request_failure,
                 meta={
@@ -229,7 +208,7 @@ class DecisionsSpider(scrapy.Spider):
             record, response.body, content_type, extension
         )
 
-    def _item_from_bytes(
+    def _item_from_bytes( #in-memory message passed from the spider to the pipeline.
         self,
         record: dict[str, str | None],
         content: bytes,
@@ -244,7 +223,7 @@ class DecisionsSpider(scrapy.Spider):
             file_extension=extension,
         )
 
-    def _parse_result(
+    def _parse_result( #At this stage, the spider has information from the search result, but it has not yet downloaded the detail page.
         self, node, response: Response, partition: DatePartition, body: str
     ) -> dict[str, str | None] | None:
         identifier = node.css("h2.title a::attr(title)").get()
@@ -366,6 +345,8 @@ class DecisionsSpider(scrapy.Spider):
             }
         )
         if "identifier" in context:
+            if failure.request.meta.get("existing_record_skipped"):
+                return
             self.record_failure(**context)
         else:
             self.records_failed += 1
@@ -382,5 +363,3 @@ class DecisionsSpider(scrapy.Spider):
             records_failed=self.records_failed,
             records_skipped=self.records_skipped,
         )
-        if self.mongo:
-            self.mongo.close()

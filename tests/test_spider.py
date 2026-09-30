@@ -4,6 +4,7 @@ from datetime import date
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import scrapy
 from scrapy.http import HtmlResponse, Response
 
 from wrc_pipeline.spiders.decisions import DecisionsSpider, WRC_BODIES
@@ -85,6 +86,36 @@ def test_next_page_is_taken_from_pager():
     response = HtmlResponse(url="https://example.test/search", body=RESULT_HTML)
     assert spider._next_page(response, 1).endswith("pageNumber=2")
     assert spider._next_page(response, 2) is None
+
+
+def test_search_queues_detail_download_for_deduplication_middleware():
+    spider = make_spider()
+    response = HtmlResponse(
+        url="https://www.workplacerelations.ie/en/search/?body=15376",
+        body=RESULT_HTML,
+        encoding="utf-8",
+        request=scrapy.Request(
+            "https://www.workplacerelations.ie/en/search/?body=15376",
+            meta={
+                "partition": spider.partitions[0],
+                "body": "Workplace Relations Commission",
+                "body_value": "15376",
+                "page_number": 1,
+            },
+        ),
+    )
+
+    with patch("wrc_pipeline.spiders.decisions.emit_event"):
+        outputs = list(spider.parse_search(response))
+
+    detail_requests = [
+        output
+        for output in outputs
+        if isinstance(output, scrapy.Request)
+        and output.callback == spider.parse_detail
+    ]
+    assert len(detail_requests) == 1
+    assert detail_requests[0].meta["dedupe_before_download"] is True
 
 
 def test_document_type_uses_pdf_magic_bytes():

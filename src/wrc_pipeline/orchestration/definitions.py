@@ -1,5 +1,6 @@
 """Dagster job that runs the existing ingestion and transformation commands."""
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -8,6 +9,19 @@ from dagster import Definitions, In, Nothing, Out, job, op
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _subprocess_env() -> dict[str, str]:
+    """Force UTF-8 output from child processes captured by Dagster."""
+    env = os.environ.copy()
+    env.pop("PYTHONLEGACYWINDOWSSTDIO", None)
+    env.update(
+        {
+            "PYTHONUTF8": "1",
+            "PYTHONIOENCODING": "utf-8",
+        }
+    )
+    return env
 
 
 @op(
@@ -30,6 +44,7 @@ def ingestion_op(context) -> None:
             f"end_date={config['end_date']}",
         ],
         cwd=PROJECT_ROOT,
+        env=_subprocess_env(),
         check=True,
     )
 
@@ -52,6 +67,7 @@ def transformation_op(context) -> None:
             config["end_date"],
         ],
         cwd=PROJECT_ROOT,
+        env=_subprocess_env(),
         check=True,
     )
 

@@ -12,6 +12,12 @@ WRC search -> Scrapy spider -> LandingPipeline -> MongoDB metadata
                                                  -> MongoDB processed collection
 ```
 
+The spider only discovers and downloads source records. `ExistingRecordMiddleware`
+performs the optional pre-download idempotency lookup outside the spider, and
+`LandingPipeline` remains the final hash-based idempotency guard. Both use
+native asynchronous PyMongo for MongoDB. The MinIO client is synchronous, so its
+calls use Scrapy's thread helper and do not block Scrapy's event loop.
+
 The spider uses inclusive ISO CLI dates (`YYYY-MM-DD`) and monthly partitions by default. See [ARCHITECTURE.md](ARCHITECTURE.md) and [docs/site-analysis.md](docs/site-analysis.md) for decisions behind the design and the verified site behavior.
 
 ## Prerequisites and setup
@@ -60,7 +66,7 @@ docker exec kedra-wrc-mongodb mongosh --quiet --eval "db.adminCommand({ ping: 1 
 curl.exe -fsS -o NUL -w "minio_health_http=%{http_code}`n" http://localhost:9000/minio/health/live
 ```
 
-Expected health results are MongoDB `{ ok: 1 }` and MinIO `minio_health_http=200`. MongoDB is exposed on `localhost:27017`. MinIO's S3 API is on `localhost:9000`, and its console is on http://localhost:9001. Sign in with `MINIO_ACCESS_KEY` and `MINIO_SECRET_KEY` from `.env`.
+Expected health results are MongoDB `{ ok: 1 }` and MinIO `minio_health_http=200`. MongoDB is exposed on port `27017`; use the exact `MONGO_URI` from `.env` because Windows may have another local MongoDB service on the other loopback address. MinIO's S3 API is on `localhost:9000`, and its console is on http://localhost:9001. Sign in with `MINIO_ACCESS_KEY` and `MINIO_SECRET_KEY` from `.env`.
 
 ## Run ingestion
 

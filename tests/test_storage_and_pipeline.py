@@ -1,11 +1,12 @@
 """Tests for storage adapters and landing idempotency."""
 
+import asyncio
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 from wrc_pipeline.pipelines import LandingPipeline
 from wrc_pipeline.storage.minio_client import MinioStorage
-from wrc_pipeline.storage.mongo import MongoStorage
+from wrc_pipeline.storage.mongo import AsyncMongoStorage, MongoStorage
 
 from .conftest import make_config
 
@@ -41,13 +42,16 @@ class FakeMongo:
     def __init__(self):
         self.landing_documents = FakeCollection()
 
-    def find_latest_landing(self, identity):
+    async def find_latest_landing(self, identity):
         records = [
             r
             for r in self.landing_documents.records
             if r["source_identity"] == identity
         ]
         return records[-1] if records else None
+
+    async def insert_landing(self, record):
+        self.landing_documents.insert_one(record)
 
     @staticmethod
     def now():
@@ -83,8 +87,8 @@ def test_landing_pipeline_does_not_upload_unchanged_content_twice():
     pipeline.minio = FakeMinio()
     spider = FakeSpider()
 
-    pipeline.process_item(make_item(), spider)
-    pipeline.process_item(make_item(), spider)
+    asyncio.run(pipeline.process_item(make_item(), spider))
+    asyncio.run(pipeline.process_item(make_item(), spider))
 
     assert len(pipeline.mongo.landing_documents.records) == 1
     assert len(pipeline.minio.uploads) == 1
@@ -97,8 +101,8 @@ def test_changed_content_gets_a_new_versioned_path():
     pipeline.minio = FakeMinio()
     spider = FakeSpider()
 
-    pipeline.process_item(make_item(b"first"), spider)
-    pipeline.process_item(make_item(b"changed"), spider)
+    asyncio.run(pipeline.process_item(make_item(b"first"), spider))
+    asyncio.run(pipeline.process_item(make_item(b"changed"), spider))
 
     assert len(pipeline.mongo.landing_documents.records) == 2
     assert len(pipeline.minio.uploads) == 2
@@ -118,6 +122,36 @@ def test_mongo_indexes_are_declared():
         storage.ensure_indexes()
     assert landing.create_index.call_count == 3
     assert processed.create_index.call_count == 1
+
+
+def test_async_mongo_storage_awaits_native_driver_operations():
+    config = make_config()
+    client = MagicMock()
+    database = MagicMock()
+    client.__getitem__.return_value = database
+    landing = MagicMock()
+    landing.create_index = AsyncMock()
+    landing.find_one = AsyncMock(return_value={"file_hash": "hash"})
+    landing.insert_one = AsyncMock()
+    client.close = AsyncMock()
+    database.__getitem__.side_effect = [landing]
+
+    with patch(
+        "wrc_pipeline.storage.mongo.AsyncMongoClient",
+        return_value=client,
+    ):
+        storage = AsyncMongoStorage(config)
+        asyncio.run(storage.ensure_indexes())
+        assert asyncio.run(storage.find_latest_landing("identity")) == {
+            "file_hash": "hash"
+        }
+        asyncio.run(storage.insert_landing({"source_identity": "identity"}))
+        asyncio.run(storage.close())
+
+    assert landing.create_index.await_count == 3
+    landing.find_one.assert_awaited_once()
+    landing.insert_one.assert_awaited_once()
+    client.close.assert_awaited_once()
 
 
 def test_minio_ensure_buckets_creates_missing_buckets():

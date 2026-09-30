@@ -34,3 +34,4 @@ logs/
 
 # Local Dagster run configuration
 run-config.yaml
+.tmp_dagster_home_*/

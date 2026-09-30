@@ -40,4 +40,7 @@ DEFAULT_REQUEST_HEADERS = {
     "User-Agent": os.getenv("WRC_USER_AGENT", "kedra-wrc-assessment/1.0"),
 }
 ITEM_PIPELINES = {"wrc_pipeline.pipelines.LandingPipeline": 300}
+DOWNLOADER_MIDDLEWARES = {
+    "wrc_pipeline.middlewares.ExistingRecordMiddleware": 543,
+}
 FEED_EXPORT_ENCODING = "utf-8"
